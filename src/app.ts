@@ -84,6 +84,7 @@ async function checkIp(req: Request, ip: string) {
 };
 
 app.get('/', async(req: Request, res: Response) => {
+	const check = await checkIp(req, req.cip);
 	const isAuth = await isAuthenticated(req);
     res.json({
         success: true,
@@ -116,7 +117,7 @@ app.get('/', async(req: Request, res: Response) => {
             },
 			"privacy": "This API stores IP addresses and risk data for analysis and reporting purposes. If you have concerns about privacy or data security, please contact me at cam@expx.dev. If you would like your IP address removed from the database, please provide the IP address and reason for removal in your message. Do note, however, it will be re-stored if the IP is queried again. If you would like to opt out of data storage, please include that in your message as well. This will block any queries for your IP address in the future, and prevent any programs from accessing your data.",
         },
-		your_example: isAuth ? await checkIp(req, req.cip) : "Unauthorized. DM @cammyzed on Discord for an API key."
+		your_example: isAuth ? check : "Unauthorized. DM @cammyzed on Discord for an API key."
     })
 });
 
