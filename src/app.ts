@@ -50,7 +50,7 @@ async function checkIp(req: Request, ip: string) {
 		};
 	} else {
 		console.log('IP not found in DB, checking IPQS API');
-		const resp = await axios.get('https://www.ipqualityscore.com/api/json/ip/'+key+'/'+req.cip+'?strictness=0&allow_public_access_points=true&fast=true&lighter_penalties=false&mobile=false')
+		const resp = await axios.get('https://www.ipqualityscore.com/api/json/ip/'+key+'/'+ip+'?strictness=0&allow_public_access_points=true&fast=true&lighter_penalties=false&mobile=false')
 		console.debug(resp.data);
 		console.log('Done!')
     	let obj = resp.data;
