@@ -2,9 +2,20 @@ import express, { NextFunction, Request, Response } from 'express';
 import Quality from './db/schemas/Quality';
 import axios from 'axios';
 import mongo from './db/mongoose';
+import APIKey from './db/schemas/APIKey';
 
 const app = express();
-const port = 3000;
+const port = parseInt(process.env.SERVER_PORT) || 3000;
+
+async function isAuthenticated(req: Request) {
+	const key = req.headers['Authorization'];
+	if (!key) return false;
+	const foundKey = await APIKey.findOne({ key: key });
+	if (!foundKey) return false;
+	foundKey.usage.requests++;
+	await foundKey.save();
+	return true;
+}
 
 app.use((req: Request, res: Response, next: NextFunction) => {
 	const cip = req.headers['cf-connecting-ip'] || req.headers['x-forwarded-for'] || req.socket.remoteAddress;
@@ -13,7 +24,7 @@ app.use((req: Request, res: Response, next: NextFunction) => {
 });
 async function checkIp(req: Request, ip: string) {
 	console.log('Checking IP:', ip);
-	const key = "Hlz1UI4kam2ptTfHTHTmcpEI8mKNj121";
+	const key = process.env.IPQS_KEY;
 	let vpnStatus;
 	const ipDb = Quality;
 	const foundIp = await ipDb.findOne({ IP: ip });
@@ -72,7 +83,7 @@ async function checkIp(req: Request, ip: string) {
 };
 
 app.get('/', async(req: Request, res: Response) => {
-    return res.json({
+    res.json({
         success: true,
         code: 200,
         data: {
@@ -102,7 +113,19 @@ app.get('/', async(req: Request, res: Response) => {
 app.get('/check/:ip', async(req: Request, res: Response) => {
 	const ip = req.params.ip;
 	const vpnStatus = await checkIp(req, ip);
-	return res.json({
+	const isAuth = await isAuthenticated(req);
+	if(!isAuth) {
+		res.status(401).json({
+			success: false,
+			code: 401,
+			message: 'Unauthorized',
+			gain: 'DM @cammyzed on Discord for an API key.'
+		})
+		return;
+	}
+
+
+	res.json({
 		success: true,
 		code: 200,
 		data: vpnStatus
