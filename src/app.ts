@@ -96,8 +96,9 @@ app.get('/', async(req: Request, res: Response) => {
         data: {
             "message": "This API provides quality and risk assessment for IP addresses.",
             "usage": {
-              "/": "Shows this help message.",
-              "/check/<ip>": "Returns a JSON response with risk analysis and metadata for <ip>."
+              "/": "Shows this help message. Does not require authentication.",
+              "/check/<ip>": "Returns a JSON response with risk analysis and metadata for <ip>. Requires authentication.",
+			  "/query/<ip>": "Returns a JSON response with risk analysis and metadata for <ip> if the IP is in the database. If not, it will return a 404 error. Does not require authentication.",
             },
             "responses": {
 			  "IP": "The IP address being queried.",
@@ -143,6 +144,25 @@ app.get('/check/:ip', async(req: Request, res: Response) => {
 		success: true,
 		code: 200,
 		data: vpnStatus
+	})
+});
+
+app.get('/query/:ip', async(req: Request, res: Response) => {
+	const toCheck = req.params.ip;
+	const ipDoc = await Quality.findOne({ IP: toCheck });
+	if (!ipDoc) {
+		res.status(404).json({
+			success: false,
+			code: 404,
+			message: 'IP not found in database.'
+		})
+		return;
+	}
+
+	res.json({
+		success: true,
+		code: 200,
+		data: ipDoc
 	})
 });
 
