@@ -11,12 +11,12 @@ app.use((req: Request, res: Response, next: NextFunction) => {
 	req.cip = Array.isArray(cip) ? cip[0] : cip;
 	next();
 });
-app.use(async(req: Request, res: Response, next: NextFunction) => {
-	console.log('Checking IP:', req.cip);
+async function checkIp(req: Request, ip: string) {
+	console.log('Checking IP:', ip);
 	const key = "Hlz1UI4kam2ptTfHTHTmcpEI8mKNj121";
 	let vpnStatus;
 	const ipDb = Quality;
-	const foundIp = await ipDb.findOne({ IP: req.cip });
+	const foundIp = await ipDb.findOne({ IP: ip });
 	if (foundIp) {
 		console.log('IP found in DB');
 		vpnStatus = {
@@ -68,9 +68,8 @@ app.use(async(req: Request, res: Response, next: NextFunction) => {
 		};
 
 	}
-	req.vpnStatus = vpnStatus;
-	next();
-});
+	return vpnStatus;
+};
 
 app.get('/', async(req: Request, res: Response) => {
     return res.json({
@@ -96,8 +95,18 @@ app.get('/', async(req: Request, res: Response) => {
             },
 			"privacy": "This API stores IP addresses and risk data for analysis and reporting purposes. If you have concerns about privacy or data security, please contact me at cam@expx.dev. If you would like your IP address removed from the database, please provide the IP address and reason for removal in your message. Do note, however, it will be re-stored if the IP is queried again. If you would like to opt out of data storage, please include that in your message as well. This will block any queries for your IP address in the future, and prevent any programs from accessing your data.",
         },
-		your_example: req.vpnStatus
+		your_example: await checkIp(req, req.cip)
     })
+});
+
+app.get('/check/:ip', async(req: Request, res: Response) => {
+	const ip = req.params.ip;
+	const vpnStatus = await checkIp(req, ip);
+	return res.json({
+		success: true,
+		code: 200,
+		data: vpnStatus
+	})
 });
 
 (async() => {
