@@ -3,6 +3,7 @@ import Quality from './db/schemas/Quality';
 import axios from 'axios';
 import mongo from './db/mongoose';
 import APIKey from './db/schemas/APIKey';
+import morgan from 'morgan';
 
 const app = express();
 const port = parseInt(process.env.SERVER_PORT) || 3000;
@@ -16,6 +17,8 @@ async function isAuthenticated(req: Request) {
 	await foundKey.save();
 	return true;
 }
+
+app.use(morgan('dev'));
 
 app.use((req: Request, res: Response, next: NextFunction) => {
 	const cip = req.headers['cf-connecting-ip'] || req.headers['x-forwarded-for'] || req.socket.remoteAddress;
