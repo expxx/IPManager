@@ -95,10 +95,18 @@ app.get('/', async(req: Request, res: Response) => {
               "/check/<ip>": "Returns a JSON response with risk analysis and metadata for <ip>."
             },
             "responses": {
-              "risk_score": "A numerical representation of the IP’s risk level.",
-              "type": "Identifies the IP type (e.g., residential, VPN, proxy, datacenter).",
-              "blacklist_status": "Indicates whether the IP is listed in known blacklists.",
-              "geo_info": "Provides country, city, and ISP details."
+			  "IP": "The IP address being queried.",
+			  "country": "The country of the IP address.",
+			  "region": "The region of the IP address.",
+			  "city": "The city of the IP address.",
+			  "ISP": "The Internet Service Provider of the IP address.",
+			  "ASN": "The Autonomous System Number of the IP address.",
+			  "org": "The organization of the IP address.",
+			  "fraud": "The fraud score of the IP address.",
+			  "crawler": "Whether the IP address is a crawler.",
+			  "proxy": "Whether the IP address is a proxy.",
+			  "vpn": "Whether the IP address is a VPN.",
+			  "tor": "Whether the IP address is a Tor node."
             },
             "authentication": "Requests must include an API key in the Authorization header.",
             "additional_info": "For rate limits, authentication, and additional details, refer to the documentation.",
@@ -113,8 +121,6 @@ app.get('/', async(req: Request, res: Response) => {
 });
 
 app.get('/check/:ip', async(req: Request, res: Response) => {
-	const ip = req.params.ip;
-	const vpnStatus = await checkIp(req, ip);
 	const isAuth = await isAuthenticated(req);
 	if(!isAuth) {
 		res.status(401).json({
@@ -126,7 +132,8 @@ app.get('/check/:ip', async(req: Request, res: Response) => {
 		return;
 	}
 
-
+	const ip = req.params.ip;
+	const vpnStatus = await checkIp(req, ip);
 	res.json({
 		success: true,
 		code: 200,
