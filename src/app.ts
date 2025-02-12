@@ -9,7 +9,7 @@ const app = express();
 const port = parseInt(process.env.SERVER_PORT) || 3000;
 
 async function isAuthenticated(req: Request) {
-	const key = req.headers['Authorization'];
+	const key = req.headers['Authorization'] || req.query.key;
 	if (!key) return false;
 	const foundKey = await APIKey.findOne({ key: key });
 	if (!foundKey) return false;
@@ -51,6 +51,7 @@ async function checkIp(req: Request, ip: string) {
 	} else {
 		console.log('IP not found in DB, checking IPQS API');
 		const resp = await axios.get('https://www.ipqualityscore.com/api/json/ip/'+key+'/'+req.cip+'?strictness=0&allow_public_access_points=true&fast=true&lighter_penalties=false&mobile=false')
+		console.debug(resp.data);
 		console.log('Done!')
     	let obj = resp.data;
 		await ipDb.create({
