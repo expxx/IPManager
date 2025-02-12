@@ -55,7 +55,7 @@ async function checkIp(req: Request, ip: string) {
 		console.log('Done!')
     	let obj = resp.data;
 		await ipDb.create({
-			IP: req.cip,
+			IP: ip,
 			country: obj.country_code,
 			region: obj.region,
 			city: obj.city,
@@ -69,7 +69,7 @@ async function checkIp(req: Request, ip: string) {
 			tor: obj.tor,
 		})
 		vpnStatus = {
-			IP: req.cip,
+			IP: ip,
 			country: obj.country,
 			region: obj.region,
 			city: obj.city,
