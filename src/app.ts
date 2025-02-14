@@ -192,16 +192,6 @@ app.get('/query/:ip', middleIpCheck(), async (req: Request, res: Response) => {
 /** Fun route to confuse bots */
 app.get('/.env', (req: Request, res: Response) => {res.status(200).send('YOU=THOUGHT')});
 
-/** Catch-all route */
-app.get('/*', (_, res) => {
-	res.status(200).json({
-		success: false,
-		code: 404,
-		message: 'Route not found.',
-		evil: 'This route returns 200 to confuse the bots >:)',
-	});
-});
-
 /** Rate limiting map */
 const rateLimitIps = new Map<string, Date>();
 
@@ -253,6 +243,16 @@ app.get('/block', async (req: Request, res: Response) => {
 		success: true,
 		code: 200,
 		message: 'Your IP has been blocked permanently.',
+	});
+});
+
+/** Catch-all route */
+app.get('/*', (_, res) => {
+	res.status(200).json({
+		success: false,
+		code: 404,
+		message: 'Route not found.',
+		evil: 'This route returns 200 to confuse the bots >:)',
 	});
 });
 
