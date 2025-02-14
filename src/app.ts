@@ -226,7 +226,12 @@ app.get('/query/:ip', middleIpCheck(), async (req: Request, res: Response) => {
 });
 
 /** Fun route to confuse bots */
-app.get('/.env', (req: Request, res: Response) => {res.status(200).send('YOU=THOUGHT')});
+app.get('/.env', async(req: Request, res: Response) => {
+	const ip = await Quality.findOne({ IP: req.cip });
+	ip.crawler = true;
+	await ip.save();
+	res.status(200).send('YOU=THOUGHT')
+});
 
 /** Rate limiting map */
 const rateLimitIps = new Map<string, Date>();
@@ -284,7 +289,10 @@ app.get('/block', async (req: Request, res: Response) => {
 });
 
 /** Catch-all route */
-app.get('/*', (_, res) => {
+app.get('/*', async(_, res) => {
+	const ip = await Quality.findOne({ IP: req.cip });
+	ip.crawler = true;
+	await ip.save();
 	res.status(200).json({
 		success: false,
 		code: 404,
