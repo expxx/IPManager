@@ -1,117 +1,124 @@
 import express, { NextFunction, Request, Response } from 'express';
 import axios from 'axios';
+import morgan from 'morgan';
+import crypto from 'crypto';
 import mongo from './db/mongoose';
 import Quality from './db/schemas/Quality';
 import APIKey from './db/schemas/APIKey';
 import Blocks from './db/schemas/Blocks';
-import morgan from 'morgan';
-import crypto from 'crypto';
+
+interface CheckResponse {
+	IP: string
+	country: string
+	region: string
+	city: string
+	ISP: string
+	ASN: string
+	org: string
+	fraud: number
+	crawler: boolean
+	proxy: boolean
+	vpn: boolean
+	tor: boolean
+	bot: boolean
+}
 
 const app = express();
 const port = parseInt(process.env.SERVER_PORT) || 3000;
 
-async function isAuthenticated(req: Request) {
-	const key = req.headers['Authorization'] || req.query.key;
-	if (!key) return false;
-	const foundKey = await APIKey.findOne({ key: key });
-	if (!foundKey) return false;
-	foundKey.usage.requests++;
-	await foundKey.save();
-	return true;
-}
-
+/** Middleware for logging requests */
 app.use(morgan('dev'));
+
+/** Middleware to extract client IP */
 app.use((req: Request, res: Response, next: NextFunction) => {
 	const cip = req.headers['cf-connecting-ip'] || req.headers['x-forwarded-for'] || req.socket.remoteAddress;
 	req.cip = Array.isArray(cip) ? cip[0] : cip;
 	next();
 });
 
-async function checkIp(req: Request, ip: string) {
-	const isBlocked = await Blocks.findOne({ IPHash: crypto.createHash('sha256').update(ip).digest('hex') });
-	if (isBlocked) {
+/** Authenticate API requests */
+async function isAuthenticated(req: Request) {
+	const key = req.headers['Authorization'] || req.query.key;
+	if (!key) return false;
+
+	const foundKey = await APIKey.findOne({ key });
+	if (!foundKey) return false;
+
+	foundKey.usage.requests++;
+	await foundKey.save();
+	return true;
+}
+
+/** Check if an IP is blocked */
+async function isIpBlocked(ip: string) {
+	const hashedIp = crypto.createHash('sha256').update(ip).digest('hex');
+	return await Blocks.findOne({ IPHash: hashedIp });
+}
+
+/** Fetch or store IP details */
+async function checkIp(ip: string) {
+	if (await isIpBlocked(ip)) {
 		return {
 			IP: crypto.createHash('sha256').update(ip).digest('hex'),
 			blocked: true,
-			message: 'Your IP is blocked and cannot be queried or stored. You cannot access this site. Please contact cam@expx.dev if you want to unblock your IP.'
-		}
+			message: 'Your IP is blocked and cannot be queried or stored. Contact cam@expx.dev to unblock.',
+		};
 	}
-	console.log('Checking IP:', ip);
-	const key = process.env.IPQS_KEY;
-	let vpnStatus;
-	const ipDb = Quality;
-	const foundIp = await ipDb.findOne({ IP: ip });
-	if (foundIp) {
-		console.log('IP found in DB');
-		vpnStatus = {
-			IP: foundIp.IP,
-			country: foundIp.country,
-			region: foundIp.region,
-			city: foundIp.city,
-			ISP: foundIp.ISP,
-			ASN: foundIp.ASN,
-			org: foundIp.org,
-			fraud: foundIp.fraud,
-			crawler: foundIp.crawler,
-			proxy: foundIp.proxy,
-			vpn: foundIp.vpn,
-			tor: foundIp.tor,
-		};
-	} else {
-		console.log('IP not found in DB, checking IPQS API');
-		const resp = await axios.get('https://www.ipqualityscore.com/api/json/ip/'+key+'/'+ip+'?strictness=0&allow_public_access_points=true&fast=true&lighter_penalties=false&mobile=false')
-		console.debug(resp.data);
-		console.log('Done!')
-    	let obj = resp.data;
-		await ipDb.create({
-			IP: ip,
-			country: obj.country_code,
-			region: obj.region,
-			city: obj.city,
-			ISP: obj.ISP,
-			ASN: obj.ASN,
-			org: obj.organization,
-			fraud: obj.fraud_score,
-			crawler: obj.is_crawler,
-			proxy: obj.proxy,
-			vpn: obj.vpn,
-			tor: obj.tor,
-		})
-		vpnStatus = {
-			IP: ip,
-			country: obj.country,
-			region: obj.region,
-			city: obj.city,
-			ISP: obj.ISP,
-			ASN: obj.ASN,
-			org: obj.org,
-			fraud: obj.fraud_score,
-			crawler: obj.crawler,
-			proxy: obj.proxy,
-			vpn: obj.vpn,
-			tor: obj.tor,
-		};
 
+	const key = process.env.IPQS_KEY;
+	const existingRecord = await Quality.findOne({ IP: ip });
+
+	if (existingRecord) {
+		console.log('IP found in DB');
+		return existingRecord.toObject();
 	}
-	return vpnStatus;
-};
-function middleIpCheck() {
-	return async(req: Request, res: Response, next: NextFunction) => {
-		const ip = req.cip;
-		const vpnStatus = await checkIp(req, ip);
-		req.vpnStatus = vpnStatus;
-		next();
-	}
+
+	console.log('Fetching from IPQS API...');
+	const { data } = await axios.get(`https://www.ipqualityscore.com/api/json/ip/${key}/${ip}?strictness=0`);
+
+	const newRecord = {
+		IP: ip,
+		country: data.country_code,
+		region: data.region,
+		city: data.city,
+		ISP: data.ISP,
+		ASN: data.ASN,
+		org: data.organization,
+		fraud: data.fraud_score,
+		crawler: data.is_crawler,
+		proxy: data.proxy,
+		vpn: data.vpn,
+		tor: data.tor,
+	};
+
+	await Quality.create(newRecord);
+	return newRecord;
 }
 
-app.get('/', middleIpCheck(), async(req: Request, res: Response) => {
-	const check = await checkIp(req, req.cip);
-    res.json({
-        success: true,
-        code: 200,
+/** Middleware to attach VPN status */
+function middleIpCheck() {
+	return async (req: Request, res: Response, next: NextFunction) => {
+		const ip = req.cip;
+		const check = await checkIp(ip);
+		if ((check as { IP: string, blocked: boolean }).blocked) {
+			res.status(403).json(check);
+			return;
+		}
+		req.vpnStatus = check as CheckResponse;
+		next();
+	};
+}
+
+/** API Endpoints */
+app.get('/', middleIpCheck(), async (req: Request, res: Response) => {
+	res.json({
+		success: true,
+		code: 200,
         data: {
             "message": "This API provides quality and risk assessment for IP addresses.",
             "usage": {
+			  "/block": "Blocks your IP address from being queried or stored. Does not require authentication. This block is permanent and cannot be removed without contacting the site owner.",
+			  "/delete": "Deletes your IP address from the database. Does not require authentication. Rate limited to once every 24 hours.",
               "/": "Shows this help message. Does not require authentication.",
               "/check/<ip>": "Returns a JSON response with risk analysis and metadata for <ip>. Requires authentication.",
 			  "/query/<ip>": "Returns a JSON response with risk analysis and metadata for <ip> if the IP is in the database. If not, it will return a 404 error. Does not require authentication.",
@@ -141,127 +148,121 @@ app.get('/', middleIpCheck(), async(req: Request, res: Response) => {
 			"deletion": "You can delete your IP from our database by visiting https://ipmanager.thecavern.dev/delete. You can only delete your IP once every 24 hours.",
 			"blocking": "You can block your IP from being queried or stored by visiting https://ipmanager.thecavern.dev/block. This block is permanent and cannot be removed without contacting the site owner. Your IP will never be stored in this database.",
         },
-		your_example: check
+		your_example: req.vpnStatus,
     })
 });
 
-app.get('/check/:ip', middleIpCheck(), async(req: Request, res: Response) => {
-	const isAuth = await isAuthenticated(req);
-	if(!isAuth) {
+app.get('/check/:ip', middleIpCheck(), async (req: Request, res: Response) => {
+	if (!(await isAuthenticated(req))) {
 		res.status(401).json({
 			success: false,
 			code: 401,
 			message: 'Unauthorized',
-			gain: 'Send cam@expx.dev an email to get an API key. Or, join the Discord server at https://discord.gg/APY5fjrM.'
-		})
+			info: 'Email cam@expx.dev for an API key or join the Discord: https://discord.gg/APY5fjrM.',
+		});
 		return;
 	}
 
-	const ip = req.params.ip;
-	const vpnStatus = await checkIp(req, ip);
 	res.json({
 		success: true,
 		code: 200,
-		data: vpnStatus
-	})
+		data: await checkIp(req.params.ip),
+	});
 });
 
-app.get('/query/:ip', middleIpCheck(), async(req: Request, res: Response) => {
-	const toCheck = req.params.ip;
-	const ipDoc = await Quality.findOne({ IP: toCheck });
+app.get('/query/:ip', middleIpCheck(), async (req: Request, res: Response) => {
+	const ipDoc = await Quality.findOne({ IP: req.params.ip });
+
 	if (!ipDoc) {
 		res.status(404).json({
 			success: false,
 			code: 404,
-			message: 'IP not found in database.'
-		})
+			message: 'IP not found in database.',
+		});
 		return;
 	}
 
 	res.json({
 		success: true,
 		code: 200,
-		data: ipDoc
-	})
+		data: ipDoc,
+	});
 });
 
-app.get('/.env', middleIpCheck(), async(req: Request, res: Response) => {
-	res.status(200).send('YOU=THOUGHT');
-})
+/** Fun route to confuse bots */
+app.get('/.env', (req: Request, res: Response) => {res.status(200).send('YOU=THOUGHT')});
 
-app.get('/*', middleIpCheck(), async(req: Request, res: Response) => {
+/** Catch-all route */
+app.get('/*', (_, res) => {
 	res.status(200).json({
 		success: false,
 		code: 404,
 		message: 'Route not found.',
-		evil: "This route returns 200 to confuse the bots >:)"
-	})
-})
+		evil: 'This route returns 200 to confuse the bots >:)',
+	});
+});
 
+/** Rate limiting map */
 const rateLimitIps = new Map<string, Date>();
-app.get('/delete', async(req: Request, res: Response) => {
-	if (rateLimitIps.has(req.cip)) {
-		const last = rateLimitIps.get(req.cip);
-		const diff = new Date().getTime() - last.getTime();
-		if (diff < 86400000) {
-			res.status(429).json({
-				success: false,
-				code: 429,
-				message: 'You can only delete your IP once every 24 hours.'
-			})
-			return;
-		}
+
+app.get('/delete', async (req: Request, res: Response) => {
+	const lastRequest = rateLimitIps.get(req.cip);
+	if (lastRequest && new Date().getTime() - lastRequest.getTime() < 86400000) {
+		res.status(429).json({
+			success: false,
+			code: 429,
+			message: 'You can only delete your IP once every 24 hours.',
+		});
+		return;
 	}
+
 	rateLimitIps.set(req.cip, new Date());
-	const ip = req.cip;
-	const ipDoc = await Quality.findOne({ IP: ip });
+
+	const ipDoc = await Quality.findOne({ IP: req.cip });
 	if (!ipDoc) {
 		res.status(404).json({
 			success: false,
 			code: 404,
-			message: 'IP not found in database.'
-		})
+			message: 'IP not found in database.',
+		});
 		return;
 	}
 
-	await Quality.deleteOne({ IP: ip });
+	await Quality.deleteOne({ IP: req.cip });
 	res.json({
 		success: true,
 		code: 200,
-		message: 'IP deleted.',
-		important: "Close this tab immediately. Further requests to this site from your IP address will result in the IP being re-stored. You can only delete your IP address once every 24 hours."
-	})
+		message: 'IP deleted. Future requests will restore it.',
+	});
 });
 
-app.get('/block', async(req: Request, res: Response) => {
-	const ip = req.cip;
-	const hash = crypto.createHash('sha256').update(ip).digest('hex');
-	const blockDoc = await Blocks.findOne({ IPHash: hash });
-	if (blockDoc) {
+app.get('/block', async (req: Request, res: Response) => {
+	const hash = crypto.createHash('sha256').update(req.cip).digest('hex');
+
+	if (await Blocks.findOne({ IPHash: hash })) {
 		res.status(403).json({
 			success: false,
 			code: 403,
-			message: 'Your IP is already blocked and cannot be queried or stored.',
-			important: 'This block is permanent and cannot be removed without contacting the site owner. Your IP will never be stored in this database.'
-		})
+			message: 'Your IP is already blocked.',
+		});
 		return;
-	} else {
-		await Blocks.create({ IPHash: hash });
-		res.json({
-			success: true,
-			code: 200,
-			message: 'Your IP has been blocked and cannot be queried or stored.',
-			important: 'This block is permanent and cannot be removed without contacting the site owner. Your IP will never be stored in this database.'
-		})
 	}
+
+	await Blocks.create({ IPHash: hash });
+	res.json({
+		success: true,
+		code: 200,
+		message: 'Your IP has been blocked permanently.',
+	});
 });
 
-(async() => {
+/** Start the server */
+(async () => {
 	await mongo();
 	app.listen(port, '0.0.0.0', () => console.log(`Server started on http://localhost:${port}`));
-})()
+})();
 
-
+/** Extend Express request object */
 declare module 'express-serve-static-core' {
 	interface Request {
 		cip: string;
@@ -271,7 +272,6 @@ declare module 'express-serve-static-core' {
 			tor: boolean;
 			fraud: number;
 			crawler: boolean;
-			bot: boolean;
 		};
 	}
 }
