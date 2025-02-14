@@ -239,6 +239,7 @@ app.get('/block', async (req: Request, res: Response) => {
 	}
 
 	await Blocks.create({ IPHash: hash });
+	await Quality.deleteOne({ IP: req.cip });
 	res.json({
 		success: true,
 		code: 200,
