@@ -289,7 +289,7 @@ app.get('/block', async (req: Request, res: Response) => {
 });
 
 /** Catch-all route */
-app.get('/*', async(_, res) => {
+app.get('/*', async(req, res) => {
 	const ip = await Quality.findOne({ IP: req.cip });
 	ip.crawler = true;
 	await ip.save();
