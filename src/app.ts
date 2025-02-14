@@ -2,20 +2,24 @@ import express, { NextFunction, Request, Response } from 'express';
 import axios from 'axios';
 import morgan from 'morgan';
 import crypto from 'crypto';
+import ip from 'ip';
 import mongo from './db/mongoose';
 import Quality from './db/schemas/Quality';
 import APIKey from './db/schemas/APIKey';
 import Blocks from './db/schemas/Blocks';
+import { isVPN, isProxy, isCrawler, isTor } from './quality';
+
+export const vpn_ipRanges = [];
+export const tor_ipRanges = [];
+export const proxy_ipRanges = [];
+export const crawler_ipRanges = [];
 
 interface CheckResponse {
 	IP: string
 	country: string
 	region: string
 	city: string
-	ISP: string
-	ASN: string
-	org: string
-	fraud: number
+	asn: string
 	crawler: boolean
 	proxy: boolean
 	vpn: boolean
@@ -64,8 +68,6 @@ async function checkIp(ip: string) {
 			message: 'Your IP is blocked and cannot be queried or stored. Contact cam@expx.dev to unblock.',
 		};
 	}
-
-	const key = process.env.IPQS_KEY;
 	const existingRecord = await Quality.findOne({ IP: ip });
 
 	if (existingRecord) {
@@ -73,23 +75,19 @@ async function checkIp(ip: string) {
 		return existingRecord.toObject();
 	}
 
-	console.log('Fetching from IPQS API...');
-	const { data } = await axios.get(`https://www.ipqualityscore.com/api/json/ip/${key}/${ip}?strictness=0`);
+	const data = await askIp2LocationAPI(ip);
 
 	const newRecord = {
 		IP: ip,
 		country: data.country_code,
-		region: data.region,
-		city: data.city,
-		ISP: data.ISP,
-		ASN: data.ASN,
-		org: data.organization,
-		fraud: data.fraud_score,
-		crawler: data.is_crawler,
-		proxy: data.proxy,
-		vpn: data.vpn,
-		tor: data.tor,
-	};
+		region: data.region_name,
+		city: data.city_name,
+		asn: data.asn,
+		crawler: isCrawler(ip),
+		proxy: isProxy(ip),
+		vpn: isVPN(ip),
+		tor: isTor(ip),
+	} as CheckResponse;
 
 	await Quality.create(newRecord);
 	return newRecord;
@@ -107,6 +105,45 @@ function middleIpCheck() {
 		req.vpnStatus = check as CheckResponse;
 		next();
 	};
+}
+
+async function loadRanges() {
+	// CIDR format
+	console.log('Loading IP ranges...');
+	console.debug('Fetching VPN IP ranges...');
+	const vpns = await axios.get('https://raw.githubusercontent.com/X4BNet/lists_vpn/refs/heads/main/ipv4.txt');
+	// <prefix>://<ip>:<port> format
+	console.debug('Fetching proxy IP ranges...');
+	const proxies = await axios.get('https://raw.githubusercontent.com/proxifly/free-proxy-list/refs/heads/main/proxies/all/data.txt');
+	// RAW IP format
+	console.debug('Fetching Tor IP ranges...');
+	const tors = await axios.get('https://raw.githubusercontent.com/AlterSolutions/tornodes_lists/refs/heads/main/guards/all_guards_ips');
+	// CIDR format
+	console.debug('Fetching Google Cloud IP ranges...');
+	const googleCloud = await axios.get('https://raw.githubusercontent.com/lord-alfred/ipranges/main/google/ipv4.txt');
+	// CIDR format
+	console.debug('Fetching Googlebot IP ranges...');
+	const goggleBot = await axios.get('https://raw.githubusercontent.com/lord-alfred/ipranges/main/googlebot/ipv4.txt');
+	// CIDR format
+	console.debug('Fetching BingBot IP ranges...');
+	const bingBot = await axios.get('https://raw.githubusercontent.com/lord-alfred/ipranges/main/bing/ipv4.txt');
+	// CIDR format
+	console.debug('Fetching GPT-3 Bot IP ranges...');
+	const gptBot = await axios.get('https://raw.githubusercontent.com/lord-alfred/ipranges/main/openai/ipv4.txt');
+
+	vpn_ipRanges.push(...vpns.data.split('\n'));
+	proxy_ipRanges.push(...proxies.data.split('\n'));
+	tor_ipRanges.push(...tors.data.split('\n'));
+	crawler_ipRanges.push(...googleCloud.data.split('\n'));
+	crawler_ipRanges.push(...goggleBot.data.split('\n'));
+	crawler_ipRanges.push(...bingBot.data.split('\n'));
+	crawler_ipRanges.push(...gptBot.data.split('\n'));
+}
+
+async function askIp2LocationAPI(ip: string) {
+	const key = process.env.IP2LOCATION_KEY;
+	const { data } = await axios.get(`https://api.ip2location.io/?ip=${ip}&key=${key}`);
+	return data as { ip: string, country_code: string, country_name: string, region_name: string, city_name: string, latitude: number, longitude: number, zip_code: string, time_zone: string, asn: string, as: string, is_proxy: boolean };
 }
 
 /** API Endpoints */
@@ -128,10 +165,6 @@ app.get('/', middleIpCheck(), async (req: Request, res: Response) => {
 			  "country": "The country of the IP address.",
 			  "region": "The region of the IP address.",
 			  "city": "The city of the IP address.",
-			  "ISP": "The Internet Service Provider of the IP address.",
-			  "ASN": "The Autonomous System Number of the IP address.",
-			  "org": "The organization of the IP address.",
-			  "fraud": "The fraud score of the IP address.",
 			  "crawler": "Whether the IP address is a crawler.",
 			  "proxy": "Whether the IP address is a proxy.",
 			  "vpn": "Whether the IP address is a VPN.",
@@ -147,6 +180,9 @@ app.get('/', middleIpCheck(), async (req: Request, res: Response) => {
 			"storage": "Upon visiting this site, any any path it follows, your IP is queried through our detection methods. This data is stored in a secure database for analysis and reporting purposes.",
 			"deletion": "You can delete your IP from our database by visiting https://ipmanager.thecavern.dev/delete. You can only delete your IP once every 24 hours.",
 			"blocking": "You can block your IP from being queried or stored by visiting https://ipmanager.thecavern.dev/block. This block is permanent and cannot be removed without contacting the site owner. Your IP will never be stored in this database.",
+			"attributions": {
+				"ip2location": "This product includes IP2Location LITE data available from https://ip2location.io. This data is used to provide geolocation information for IP addresses.",
+			}
         },
 		your_example: req.vpnStatus,
     })
@@ -259,6 +295,7 @@ app.get('/*', (_, res) => {
 
 /** Start the server */
 (async () => {
+	await loadRanges();
 	await mongo();
 	app.listen(port, '0.0.0.0', () => console.log(`Server started on http://localhost:${port}`));
 })();
@@ -267,12 +304,6 @@ app.get('/*', (_, res) => {
 declare module 'express-serve-static-core' {
 	interface Request {
 		cip: string;
-		vpnStatus: {
-			vpn: boolean;
-			proxy: boolean;
-			tor: boolean;
-			fraud: number;
-			crawler: boolean;
-		};
+		vpnStatus: CheckResponse;
 	}
 }

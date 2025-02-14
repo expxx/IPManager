@@ -5,11 +5,8 @@ const schema = new Schema({
     country: String,
     region: String,
     city: String,
-    ISP: String,
-    ASN: String,
-    org: String,
+    asn: String,
     
-    fraud: Number,
     crawler: Boolean,
     proxy: Boolean,
     vpn: Boolean,
