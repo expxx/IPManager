@@ -290,11 +290,6 @@ app.get('/block', async (req: Request, res: Response) => {
 
 /** Catch-all route */
 app.get('/*', async(req, res) => {
-	if (!req.path.includes("favicon.ico")) {
-		const ip = await Quality.findOne({ IP: req.cip });
-		ip.crawler = true;
-		await ip.save();
-	}
 	res.status(200).json({
 		success: false,
 		code: 404,
